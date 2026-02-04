@@ -4,7 +4,15 @@ import asyncio
 from temporalio import Worker
 from temporalio.client import Client
 
-from .config import get_settings
+from shared.config import get_settings
+from workers.activities import (
+    download_from_s3,
+    parse_document,
+    generate_embeddings,
+    upsert_to_qdrant,
+    update_status
+)
+from workers.workflows import IndexingWorkflow
 
 
 async def main():
@@ -18,9 +26,15 @@ async def main():
 
     worker = Worker(
         client=client,
-        task_queue="upload-queue",
-        workflows=[],
-        activities=[],
+        task_queue="indexing-queue",
+        workflows=[IndexingWorkflow],
+        activities=[
+            download_from_s3,
+            parse_document,
+            generate_embeddings,
+            upsert_to_qdrant,
+            update_status
+        ],
     )
 
     print("Worker started, listening for tasks...")

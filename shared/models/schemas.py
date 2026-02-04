@@ -62,6 +62,15 @@ class MessageListResponse(BaseModel):
     messages: list[Message]
 
 
+class DocumentChunk(BaseModel):
+    """Document chunk model."""
+    content: str
+    embedding: list[float]
+    chunk_index: int
+    filename: str
+    upload_timestamp: datetime
+
+
 class Conversation(BaseModel):
     """Conversation model."""
     id: UUID = Field(default_factory=uuid4)

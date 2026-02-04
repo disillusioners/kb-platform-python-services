@@ -5,15 +5,20 @@ from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 import json
+import uuid
 
-from .config import get_settings
-from .models.database import init_db, get_document, create_conversation, save_message
-from .models.schemas import (
+from shared.config import get_settings
+from shared.models.database import (
+    init_db, get_document, get_db,
+    create_conversation, save_message, get_messages, get_conversation
+)
+from shared.models.schemas import (
     QueryRequest, Document, Conversation, Message,
-    SSEEvent, HealthResponse, ReadinessResponse
+    SSEEvent, HealthResponse, ReadinessResponse,
+    MessageRole
 )
 from .services.rag import RAGEngine
-from .services.qdrant import QdrantClient
+from shared.services.qdrant import QdrantClient
 
 settings = get_settings()
 
@@ -39,6 +44,7 @@ rag_engine = RAGEngine(
     settings.openai_api_key,
     settings.llm_model,
     settings.llm_temperature,
+    settings.embedding_model,
 )
 
 
@@ -68,18 +74,42 @@ async def readiness_check():
 @app.post("/api/v1/query")
 async def query(request: QueryRequest):
     """Query endpoint with SSE streaming."""
-    async def generate_response() -> AsyncIterator[str]:
-        query_id = str(__import__("uuid").uuid4())
+    
+    conversation_id = request.conversation_id
+    history = []
+    
+    # Pre-processing (DB ops)
+    async for conn in get_db():
+        if not conversation_id:
+            conv = await create_conversation(conn)
+            conversation_id = conv.id
+        
+        # Get history
+        msgs = await get_messages(conn, str(conversation_id))
+        history = [{"role": m.role.value, "content": m.content} for m in msgs]
+        
+        # Save user message
+        await save_message(conn, str(conversation_id), MessageRole.USER, request.query)
+
+    async def generate_response(conv_id: uuid.UUID, hist: list) -> AsyncIterator[str]:
+        query_id = str(uuid.uuid4())
+        full_response = ""
 
         yield f"data: {json.dumps(SSEEvent(type='start', id=query_id).model_dump())}\n\n"
 
         try:
             async for chunk in rag_engine.query(
                 request.query,
-                request.conversation_id,
-                request.top_k
+                str(conv_id),
+                request.top_k,
+                hist
             ):
+                full_response += chunk
                 yield f"data: {json.dumps(SSEEvent(type='chunk', content=chunk).model_dump())}\n\n"
+
+            # Save Assistant Message
+            async for conn in get_db():
+                await save_message(conn, str(conv_id), MessageRole.ASSISTANT, full_response)
 
             yield f"data: {json.dumps(SSEEvent(type='end', id=query_id).model_dump())}\n\n"
 
@@ -87,7 +117,7 @@ async def query(request: QueryRequest):
             yield f"data: {json.dumps(SSEEvent(type='error', code='INTERNAL_ERROR', message=str(e)).model_dump())}\n\n"
 
     return StreamingResponse(
-        generate_response(),
+        generate_response(conversation_id, history),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -117,7 +147,7 @@ async def delete_document_vectors(document_id: str):
 async def get_conversation_endpoint(conversation_id: str):
     """Get conversation by ID."""
     async for conn in get_db():
-        conv = await get_document(conn, conversation_id)
+        conv = await get_conversation(conn, conversation_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return conv

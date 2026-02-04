@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-3.5-turbo"
     llm_temperature: float = 0.7
 
+    # S3
+    s3_bucket: str = "kb-documents"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = "us-east-1"
+    s3_endpoint_url: str | None = None
+
+    # Temporal
+    temporal_host: str = "localhost"
+    temporal_port: int = 7233
+
 
 @lru_cache
 def get_settings() -> Settings:

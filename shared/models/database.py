@@ -2,11 +2,8 @@
 
 from typing import AsyncIterator
 import asyncpg
-from sqlmodel import SQLModel, create_engine, Session, select
-from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.asyncio import create_async_engine
-from .config import get_settings
-from .models.schemas import Document, Message, Conversation, DocumentStatus, MessageRole
+from shared.config import get_settings
+from shared.models.schemas import Document, Message, Conversation, DocumentStatus, MessageRole
 from datetime import datetime
 
 
@@ -15,7 +12,6 @@ class Database:
 
     def __init__(self):
         self.settings = get_settings()
-        self.engine = None
         self.pool = None
 
     async def connect(self):
@@ -52,6 +48,8 @@ db = Database()
 
 async def get_db() -> AsyncIterator[asyncpg.Connection]:
     """Get database connection for dependency injection."""
+    if not db.pool:
+        await db.connect()
     async with db.pool.acquire() as conn:
         yield conn
 
@@ -105,12 +103,12 @@ async def update_document_status(
         SET status = $1, error_message = $2,
             indexed_at = CASE WHEN $1 = 'complete' THEN NOW() ELSE indexed_at END,
             metadata = CASE WHEN $3 IS NOT NULL
-                THEN jsonb_set(COALESCE(metadata, '{}'::jsonb), '{chunk_count}', to_jsonb($3))
+                THEN jsonb_set(COALESCE(metadata, '{}'::jsonb), '{chunk_count}', to_jsonb($3::int))
                 ELSE metadata
             END
-        WHERE id = $3
+        WHERE id = $4
         """,
-        status.value, error_message, document_id, chunk_count
+        status.value, error_message, chunk_count, document_id
     )
 
 

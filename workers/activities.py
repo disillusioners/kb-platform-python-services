@@ -166,7 +166,6 @@ async def generate_embeddings(
     
     try:
         response = await client.embeddings.create(
-            file=texts, # Wait, 'file'?? No, 'input'
             model=settings.embedding_model,
             input=texts
         )

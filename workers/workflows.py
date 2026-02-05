@@ -16,13 +16,20 @@ with workflow.unsafe.imports():
 
 @workflow.defn
 class UploadWorkflow:
+    def __init__(self):
+        self._upload_complete = False
+
+    @workflow.signal(name="upload-complete")
+    async def signal_upload_complete(self):
+        self._upload_complete = True
+
     @workflow.run
     async def run(self, document_id: str, s3_key: str):
         """Wait for client to complete upload or timeout."""
-        # Wait for upload-complete signal with timeout (15 minutes)
+        # Wait for "upload-complete" signal with timeout (15 minutes)
         try:
             await workflow.wait_condition(
-                lambda: workflow.payload("upload-complete", None) is not None,
+                lambda: self._upload_complete,
                 timeout=timedelta(minutes=15)
             )
 

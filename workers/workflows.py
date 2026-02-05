@@ -4,6 +4,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports():
     from workers.activities import (
+        delete_from_s3,
         download_from_s3,
         parse_document,
         generate_embeddings,
@@ -11,6 +12,63 @@ with workflow.unsafe.imports():
         update_status
     )
     from shared.models.schemas import DocumentStatus
+
+
+@workflow.defn
+class UploadWorkflow:
+    @workflow.run
+    async def run(self, document_id: str, s3_key: str):
+        """Wait for client to complete upload or timeout."""
+        # Wait for upload-complete signal with timeout (15 minutes)
+        try:
+            await workflow.wait_condition(
+                lambda: workflow.payload("upload-complete", None) is not None,
+                timeout=timedelta(minutes=15)
+            )
+
+            # Signal received - start indexing
+            await workflow.execute_child_workflow(
+                IndexingWorkflow.run,
+                args=[document_id],
+                task_queue="indexing-queue",
+            )
+            return "Upload completed, indexing started"
+
+        except TimeoutError:
+            # Upload timed out - cleanup S3 file and mark as failed
+            workflow.logger.error(f"Upload timed out for document {document_id}, cleaning up S3")
+
+            await workflow.execute_activity(
+                delete_from_s3,
+                args=[s3_key],
+                start_to_close_timeout=timedelta(minutes=2),
+            )
+
+            await workflow.execute_activity(
+                update_status,
+                args=[document_id, DocumentStatus.FAILED.value, "Upload timed out"],
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+
+            raise TimeoutError(f"Upload timed out for document {document_id}")
+
+        except Exception as e:
+            # Workflow failed for other reasons - cleanup S3 file
+            workflow.logger.error(f"Upload workflow failed for document {document_id}: {e}, cleaning up S3")
+
+            await workflow.execute_activity(
+                delete_from_s3,
+                args=[s3_key],
+                start_to_close_timeout=timedelta(minutes=2),
+            )
+
+            await workflow.execute_activity(
+                update_status,
+                args=[document_id, DocumentStatus.FAILED.value, str(e)],
+                start_to_close_timeout=timedelta(seconds=10),
+            )
+
+            raise e
 
 
 @workflow.defn

@@ -31,7 +31,7 @@ from qdrant_client.models import PointStruct
 async def download_from_s3(document_id: str) -> bytes:
     """Download document from S3."""
     settings = get_settings()
-    
+
     # Initialize DB if needed (activity worker might need to init)
     if not db.pool:
         await db.connect()
@@ -40,7 +40,7 @@ async def download_from_s3(document_id: str) -> bytes:
         document = await get_document(conn, document_id)
         if not document:
             raise ValueError(f"Document {document_id} not found")
-        
+
         s3_key = document.s3_key
 
     # S3 Client
@@ -59,6 +59,30 @@ async def download_from_s3(document_id: str) -> bytes:
     except Exception as e:
         activity.logger.error(f"Failed to download from S3: {e}")
         raise
+
+
+@activity.defn
+async def delete_from_s3(s3_key: str) -> str:
+    """Delete document from S3 for cleanup."""
+    settings = get_settings()
+
+    # S3 Client
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.aws_access_key_id,
+        aws_secret_access_key=settings.aws_secret_access_key,
+        region_name=settings.aws_region,
+        endpoint_url=settings.s3_endpoint_url
+    )
+
+    try:
+        s3.delete_object(Bucket=settings.s3_bucket, Key=s3_key)
+        activity.logger.info(f"Deleted file from S3: {s3_key}")
+        return f"Deleted {s3_key}"
+    except Exception as e:
+        activity.logger.error(f"Failed to delete from S3: {e}")
+        # Don't fail the workflow if cleanup fails, just log it
+        return f"Failed to delete {s3_key}: {e}"
 
 
 @activity.defn

@@ -6,13 +6,14 @@ from temporalio.client import Client
 
 from shared.config import get_settings
 from workers.activities import (
+    delete_from_s3,
     download_from_s3,
     parse_document,
     generate_embeddings,
     upsert_to_qdrant,
     update_status
 )
-from workers.workflows import IndexingWorkflow
+from workers.workflows import IndexingWorkflow, UploadWorkflow
 
 
 async def main():
@@ -27,8 +28,9 @@ async def main():
     worker = Worker(
         client=client,
         task_queue="indexing-queue",
-        workflows=[IndexingWorkflow],
+        workflows=[UploadWorkflow, IndexingWorkflow],
         activities=[
+            delete_from_s3,
             download_from_s3,
             parse_document,
             generate_embeddings,

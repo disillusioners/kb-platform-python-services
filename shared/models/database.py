@@ -147,7 +147,7 @@ async def get_messages(
         """
         SELECT * FROM messages
         WHERE conversation_id = $1
-        ORDER BY timestamp ASC
+        ORDER BY created_at ASC
         """,
         conversation_id
     )

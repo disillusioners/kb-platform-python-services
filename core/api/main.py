@@ -126,31 +126,10 @@ async def query(request: QueryRequest):
     )
 
 
-@app.get("/api/v1/documents/{document_id}", response_model=Document)
-async def get_document_endpoint(document_id: str):
-    """Get document by ID."""
-    async for conn in get_db():
-        doc = await get_document(conn, document_id)
-        if doc is None:
-            raise HTTPException(status_code=404, detail="Document not found")
-        return doc
 
 
-@app.delete("/api/v1/documents/{document_id}/vectors")
-async def delete_document_vectors(document_id: str):
-    """Delete document vectors from Qdrant."""
-    await qdrant_client.delete_document(document_id)
-    return None
 
 
-@app.get("/api/v1/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation_endpoint(conversation_id: str):
-    """Get conversation by ID."""
-    async for conn in get_db():
-        conv = await get_conversation(conn, conversation_id)
-        if conv is None:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        return conv
 
 
 def main():

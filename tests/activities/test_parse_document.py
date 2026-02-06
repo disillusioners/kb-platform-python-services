@@ -75,8 +75,7 @@ async def test_unsupported_file_type():
         await parse_document(
             "test-doc-id",
             b"some data",
-            "file.xyz",
-            file_parser=mock_parser
+            "file.xyz"
         )
     
     # Verify error message

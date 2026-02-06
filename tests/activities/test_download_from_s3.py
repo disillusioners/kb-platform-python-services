@@ -30,7 +30,14 @@ async def test_download_success(mock_s3_client, mock_db_pool):
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_conn.__aexit__ = AsyncMock(return_value=None)
     mock_db_pool.acquire.return_value = mock_conn
-    mock_conn.fetchrow = AsyncMock(return_value=dict(mock_doc))
+    mock_conn.fetchrow = AsyncMock(return_value={
+        "id": "12345678-1234-5678-1234-567812345678",
+        "s3_key": "documents/test-id/file.pdf",
+        "filename": "test-file.pdf",
+        "file_size": 1024,
+        "status": "pending",
+        "created_at": "2023-01-01T00:00:00"
+    })
     
     # Setup mock S3 response
     mock_s3_client.get_object.return_value = {
@@ -47,7 +54,7 @@ async def test_download_success(mock_s3_client, mock_db_pool):
     # Assertions
     assert result == (b"file content", "test-file.pdf")
     mock_s3_client.get_object.assert_called_once_with(
-        Bucket="test-bucket",
+        Bucket="kb-documents",
         Key="documents/test-id/file.pdf"
     )
 
@@ -88,7 +95,14 @@ async def test_s3_download_error(mock_s3_client, mock_db_pool):
     mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
     mock_conn.__aexit__ = AsyncMock(return_value=None)
     mock_db_pool.acquire.return_value = mock_conn
-    mock_conn.fetchrow = AsyncMock(return_value=dict(mock_doc))
+    mock_conn.fetchrow = AsyncMock(return_value={
+        "id": "12345678-1234-5678-1234-567812345678",
+        "s3_key": "documents/test-id/file.pdf",
+        "filename": "test-file.pdf",
+        "file_size": 1024,
+        "status": "pending",
+        "created_at": "2023-01-01T00:00:00"
+    })
     
     # Setup mock S3 to raise exception
     mock_s3_client.get_object.side_effect = Exception("S3 access denied")

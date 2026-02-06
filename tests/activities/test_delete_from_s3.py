@@ -11,8 +11,17 @@ def mock_s3_client(mocker):
     return mocker.MagicMock()
 
 
+@pytest.fixture
+def mock_settings(mocker):
+    """Mock settings."""
+    settings = mocker.Mock()
+    settings.s3_bucket = "test-bucket"
+    mocker.patch("workers.activities.get_settings", return_value=settings)
+    return settings
+
+
 @pytest.mark.asyncio
-async def test_delete_success(mock_s3_client):
+async def test_delete_success(mock_s3_client, mock_settings):
     """Test successful file deletion from S3."""
     # Call the activity with mocked S3 client
     result = await delete_from_s3(

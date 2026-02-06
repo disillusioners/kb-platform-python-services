@@ -23,10 +23,7 @@ import docx
 from bs4 import BeautifulSoup
 
 # LlamaIndex for splitting
-try:
-    from llama_index.text_splitter import TokenTextSplitter
-except ImportError:
-    from llama_index.core.node_parser import TextSplitter as TokenTextSplitter
+from llama_index.core.node_parser import TokenTextSplitter
 from qdrant_client.models import PointStruct
 
 
@@ -205,7 +202,10 @@ async def generate_embeddings(
         openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
     
     texts = [c.content for c in chunks]
-    
+
+    if not texts:
+        return []
+        
     # Process in batches if needed, but for now simple
     # OpenAI embedding API can handle arrays
     
@@ -237,6 +237,9 @@ async def upsert_to_qdrant(
     if qdrant_client is None:
         qdrant_client = QdrantClient(settings.qdrant_url, settings.qdrant_collection)
     
+    if not chunks:
+        return
+
     await qdrant_client.ensure_collection(settings.embedding_dimension)
     
     points = [

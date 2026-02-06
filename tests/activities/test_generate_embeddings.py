@@ -25,7 +25,7 @@ def mock_openai_client(mocker):
 
 
 @pytest.fixture
-def sample_chunks(self):
+def sample_chunks():
     """Create sample document chunks."""
     return [
         DocumentChunk(

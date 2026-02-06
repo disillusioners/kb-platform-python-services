@@ -41,9 +41,5 @@ mypy = "^1.7.0"
 grpcio-tools = "^1.60.0"
 
 [tool.poetry.scripts]
-core = "core.api.main:main"
+core = "core.api:main"
 worker = "workers.worker:main"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"

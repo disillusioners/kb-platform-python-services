@@ -17,7 +17,7 @@ from shared.models.schemas import (
     SSEEvent, HealthResponse, ReadinessResponse,
     MessageRole
 )
-from .services.rag import RAGEngine
+from core.services.rag import RAGEngine
 from shared.services.qdrant import QdrantClient
 
 settings = get_settings()

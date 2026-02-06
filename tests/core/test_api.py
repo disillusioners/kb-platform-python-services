@@ -4,15 +4,10 @@ import pytest
 import json
 import uuid
 from unittest.mock import MagicMock, AsyncMock, patch
-try:
-    from fastapi.testclient import TestClient
-    from core.api.main import app, get_db
-    deps_installed = True
-except ImportError:
-    TestClient = None
-    app = None
-    get_db = None
-    deps_installed = False
+from fastapi.testclient import TestClient
+from core.api.main import app, get_db
+
+from shared.models.schemas import SSEEvent
 
 from shared.models.schemas import SSEEvent
 
@@ -26,10 +21,6 @@ def mock_db_conn():
 @pytest.fixture
 def client(mock_db_conn):
     """FastAPI test client with overwritten DB dependency."""
-    if not deps_installed:
-        yield None
-        return
-        
     async def override_get_db():
         yield mock_db_conn
     
@@ -46,14 +37,12 @@ def client(mock_db_conn):
     
     app.dependency_overrides.clear()
 
-@pytest.mark.skipif(not deps_installed, reason="FastAPI dependencies not installed")
 def test_health_check(client):
     """Test healthz endpoint."""
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
-@pytest.mark.skipif(not deps_installed, reason="FastAPI dependencies not installed")
 def test_readiness_check(client):
     """Test readyz endpoint."""
     response = client.get("/readyz")
@@ -61,7 +50,6 @@ def test_readiness_check(client):
     assert response.json()["status"] == "ready"
     assert "openai" in response.json()["dependencies"]
 
-@pytest.mark.skipif(not deps_installed, reason="FastAPI dependencies not installed")
 @patch("core.api.main.create_conversation")
 @patch("core.api.main.get_messages")
 @patch("core.api.main.save_message")
@@ -77,7 +65,7 @@ def test_query_new_conversation(mock_save, mock_get_msgs, mock_create, client, m
     response = client.post("/api/v1/query", json=payload)
     
     assert response.status_code == 200
-    assert response.headers["content-type"] == "text/event-stream"
+    assert response.headers["content-type"].startswith("text/event-stream")
     
     # Verify DB interactions
     mock_create.assert_called_once() # Should create conversation
@@ -97,7 +85,6 @@ def test_query_new_conversation(mock_save, mock_get_msgs, mock_create, client, m
     assert start_event["type"] == "start"
     assert start_event["id"] is not None
 
-@pytest.mark.skipif(not deps_installed, reason="FastAPI dependencies not installed")
 @patch("core.api.main.create_conversation")
 @patch("core.api.main.get_messages")
 @patch("core.api.main.save_message")
@@ -126,7 +113,6 @@ def test_query_existing_conversation(mock_save, mock_get_msgs, mock_create, clie
     mock_get_msgs.assert_called_once()
     assert mock_get_msgs.call_args[0][1] == existing_id
 
-@pytest.mark.skipif(not deps_installed, reason="FastAPI dependencies not installed")
 @patch("core.api.main.create_conversation")
 @patch("core.api.main.get_messages")
 @patch("core.api.main.save_message")

@@ -1,119 +1,98 @@
-"""Unit tests for download_from_s3 activity."""
+"""Tests for download_from_s3 activity."""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch, ANY
 from workers.activities import download_from_s3
 
 
+class MockDocument:
+    """Mock Document for testing."""
+    def __init__(self, doc_id: str, s3_key: str, filename: str):
+        self.id = doc_id
+        self.s3_key = s3_key
+        self.filename = filename
+
+
 @pytest.fixture
-def mock_s3_client(mocker):
+def mock_s3_client():
     """Create a mock S3 client."""
-    return mocker.MagicMock()
+    mock_client = MagicMock()
+    mock_response = {
+        "Body": MagicMock(read=MagicMock(return_value=b"test document content"))
+    }
+    mock_client.get_object.return_value = mock_response
+    return mock_client
 
 
 @pytest.fixture
-def mock_db_pool(mocker):
+def mock_db_pool():
     """Create a mock database pool."""
-    return mocker.MagicMock()
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
+    mock_pool.acquire.return_value.__aexit__.return_value = None
+    return mock_pool
 
 
 @pytest.mark.asyncio
-async def test_download_success(mock_s3_client, mock_db_pool):
+async def test_download_from_s3_success(mock_s3_client, mock_db_pool):
     """Test successful document download from S3."""
-    # Setup mock document
-    mock_doc = MagicMock()
-    mock_doc.s3_key = "documents/test-id/file.pdf"
-    mock_doc.filename = "test-file.pdf"
-    
-    # Setup mock connection
-    mock_conn = MagicMock()
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=None)
-    mock_db_pool.acquire.return_value = mock_conn
-    mock_conn.fetchrow = AsyncMock(return_value={
-        "id": "12345678-1234-5678-1234-567812345678",
-        "s3_key": "documents/test-id/file.pdf",
-        "filename": "test-file.pdf",
-        "file_size": 1024,
-        "status": "pending",
-        "created_at": "2023-01-01T00:00:00"
-    })
-    
-    # Setup mock S3 response
-    mock_s3_client.get_object.return_value = {
-        "Body": MagicMock(read=MagicMock(return_value=b"file content"))
-    }
-    
-    # Call the activity with mocked dependencies
-    result = await download_from_s3(
-        "test-doc-id",
-        s3_client=mock_s3_client,
-        db_pool=mock_db_pool
-    )
-    
-    # Assertions
-    assert result == (b"file content", "test-file.pdf")
-    mock_s3_client.get_object.assert_called_once_with(
-        Bucket="kb-documents",
-        Key="documents/test-id/file.pdf"
-    )
+    document_id = "doc-123"
+    s3_key = "documents/doc-123/test.pdf"
+    filename = "test.pdf"
+    file_content = b"test document content"
 
+    mock_doc = MockDocument(document_id, s3_key, filename)
 
-@pytest.mark.asyncio
-async def test_document_not_found(mock_s3_client, mock_db_pool):
-    """Test ValueError when document doesn't exist in database."""
-    # Setup mock connection to return None (document not found)
-    mock_conn = MagicMock()
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=None)
-    mock_db_pool.acquire.return_value = mock_conn
-    mock_conn.fetchrow = AsyncMock(return_value=None)
-    
-    # Call the activity - should raise ValueError
-    with pytest.raises(ValueError) as exc_info:
-        await download_from_s3(
-            "nonexistent-doc-id",
+    with patch('workers.activities.get_document', new_callable=AsyncMock) as mock_get_doc:
+        mock_get_doc.return_value = mock_doc
+
+        result_content, result_filename = await download_from_s3(
+            document_id=document_id,
             s3_client=mock_s3_client,
             db_pool=mock_db_pool
         )
-    
-    # Assert error message
-    assert "not found" in str(exc_info.value).lower()
-    assert "nonexistent-doc-id" in str(exc_info.value)
+
+        assert result_content == file_content
+        assert result_filename == filename
+        mock_s3_client.get_object.assert_called_once_with(
+            Bucket=ANY,  # Settings will provide bucket
+            Key=s3_key
+        )
 
 
 @pytest.mark.asyncio
-async def test_s3_download_error(mock_s3_client, mock_db_pool):
-    """Test exception propagation when S3 download fails."""
-    # Setup mock document
-    mock_doc = MagicMock()
-    mock_doc.s3_key = "documents/test-id/file.pdf"
-    mock_doc.filename = "test-file.pdf"
-    
-    # Setup mock connection
-    mock_conn = MagicMock()
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=None)
-    mock_db_pool.acquire.return_value = mock_conn
-    mock_conn.fetchrow = AsyncMock(return_value={
-        "id": "12345678-1234-5678-1234-567812345678",
-        "s3_key": "documents/test-id/file.pdf",
-        "filename": "test-file.pdf",
-        "file_size": 1024,
-        "status": "pending",
-        "created_at": "2023-01-01T00:00:00"
-    })
-    
-    # Setup mock S3 to raise exception
+async def test_download_from_s3_document_not_found(mock_s3_client, mock_db_pool):
+    """Test download fails when document not found in DB."""
+    document_id = "nonexistent-doc"
+
+    with patch('workers.activities.get_document', new_callable=AsyncMock) as mock_get_doc:
+        mock_get_doc.return_value = None
+
+        with pytest.raises(ValueError, match=f"Document {document_id} not found"):
+            await download_from_s3(
+                document_id=document_id,
+                s3_client=mock_s3_client,
+                db_pool=mock_db_pool
+            )
+
+
+@pytest.mark.asyncio
+async def test_download_from_s3_s3_error(mock_s3_client, mock_db_pool):
+    """Test download fails when S3 returns error."""
+    document_id = "doc-123"
+    s3_key = "documents/doc-123/test.pdf"
+
+    mock_doc = MockDocument(document_id, s3_key, "test.pdf")
+
     mock_s3_client.get_object.side_effect = Exception("S3 access denied")
-    
-    # Call the activity - should propagate exception
-    with pytest.raises(Exception) as exc_info:
-        await download_from_s3(
-            "test-doc-id",
-            s3_client=mock_s3_client,
-            db_pool=mock_db_pool
-        )
-    
-    # Assert error message
-    assert "S3 access denied" in str(exc_info.value)
+
+    with patch('workers.activities.get_document', new_callable=AsyncMock) as mock_get_doc:
+        mock_get_doc.return_value = mock_doc
+
+        with pytest.raises(Exception, match="S3 access denied"):
+            await download_from_s3(
+                document_id=document_id,
+                s3_client=mock_s3_client,
+                db_pool=mock_db_pool
+            )

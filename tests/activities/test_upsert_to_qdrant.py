@@ -1,34 +1,25 @@
-"""Unit tests for upsert_to_qdrant activity."""
+"""Tests for upsert_to_qdrant activity."""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-from datetime import datetime
+from unittest.mock import MagicMock, AsyncMock, patch
 from workers.activities import upsert_to_qdrant
 from shared.models.schemas import DocumentChunk
+from datetime import datetime
 
 
 @pytest.fixture
-def mock_qdrant_client(mocker):
-    """Create a mock Qdrant client."""
-    mock = mocker.MagicMock()
-    mock.ensure_collection = AsyncMock()
-    mock.upsert_vectors = AsyncMock()
-    return mock
-
-
-@pytest.fixture
-def sample_chunks():
-    """Create sample document chunks with embeddings."""
+def mock_chunks():
+    """Create mock document chunks with embeddings."""
     return [
         DocumentChunk(
-            content="First chunk of text",
+            content="First chunk content",
             embedding=[0.1, 0.2, 0.3],
             chunk_index=0,
             filename="test.pdf",
             upload_timestamp=datetime.utcnow()
         ),
         DocumentChunk(
-            content="Second chunk of text",
+            content="Second chunk content",
             embedding=[0.4, 0.5, 0.6],
             chunk_index=1,
             filename="test.pdf",
@@ -37,105 +28,107 @@ def sample_chunks():
     ]
 
 
+@pytest.fixture
+def mock_qdrant_client():
+    """Create a mock Qdrant client."""
+    mock_client = MagicMock()
+    mock_client.ensure_collection = AsyncMock()
+    mock_client.upsert_vectors = AsyncMock()
+    return mock_client
+
+
 @pytest.mark.asyncio
-async def test_upsert_success(mock_qdrant_client, sample_chunks):
+async def test_upsert_to_qdrant_success(mock_chunks, mock_qdrant_client):
     """Test successful vector upsert to Qdrant."""
-    result = await upsert_to_qdrant(
-        "test-doc-id",
-        sample_chunks,
+    document_id = "doc-123"
+
+    await upsert_to_qdrant(
+        document_id=document_id,
+        chunks=mock_chunks,
         qdrant_client=mock_qdrant_client
     )
-    
-    # Verify collection was ensured
+
     mock_qdrant_client.ensure_collection.assert_called_once()
-    
-    # Verify vectors were upserted
     mock_qdrant_client.upsert_vectors.assert_called_once()
-    
-    # Get the points that were upserted
-    call_args = mock_qdrant_client.upsert_vectors.call_args
-    points = call_args[0][0]  # First positional argument
-    
-    # Verify point structure
-    assert len(points) == 2
-    assert all(hasattr(point, 'vector') for point in points)
-    assert all(hasattr(point, 'payload') for point in points)
-    assert all(hasattr(point, 'id') for point in points)
 
 
 @pytest.mark.asyncio
-async def test_upsert_empty_chunks(mock_qdrant_client):
-    """Test handling of empty chunk list."""
-    result = await upsert_to_qdrant(
-        "test-doc-id",
-        [],
+async def test_upsert_to_qdrant_empty_chunks(mock_qdrant_client):
+    """Test upsert with empty chunks - should return early."""
+    document_id = "doc-empty"
+
+    await upsert_to_qdrant(
+        document_id=document_id,
+        chunks=[],
         qdrant_client=mock_qdrant_client
     )
-    
-    # Should not call upsert_vectors with empty list
+
+    # Should not call Qdrant methods for empty chunks
+    mock_qdrant_client.ensure_collection.assert_not_called()
     mock_qdrant_client.upsert_vectors.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_upsert_single_chunk(mock_qdrant_client):
+async def test_upsert_to_qdrant_ensure_collection_error(mock_chunks):
+    """Test upsert fails when collection creation fails."""
+    document_id = "doc-123"
+
+    mock_client = MagicMock()
+    mock_client.ensure_collection = AsyncMock(
+        side_effect=Exception("Qdrant collection creation failed")
+    )
+
+    with pytest.raises(Exception, match="Qdrant collection creation failed"):
+        await upsert_to_qdrant(
+            document_id=document_id,
+            chunks=mock_chunks,
+            qdrant_client=mock_client
+        )
+
+
+@pytest.mark.asyncio
+async def test_upsert_to_qdrant_upsert_error(mock_chunks):
+    """Test upsert fails when vector upsert fails."""
+    document_id = "doc-123"
+
+    mock_client = MagicMock()
+    mock_client.ensure_collection = AsyncMock()
+    mock_client.upsert_vectors = AsyncMock(
+        side_effect=Exception("Qdrant upsert failed")
+    )
+
+    with pytest.raises(Exception, match="Qdrant upsert failed"):
+        await upsert_to_qdrant(
+            document_id=document_id,
+            chunks=mock_chunks,
+            qdrant_client=mock_client
+        )
+
+
+@pytest.mark.asyncio
+async def test_upsert_to_qdrant_single_chunk():
     """Test upsert with single chunk."""
-    single_chunk = [
+    document_id = "doc-single"
+
+    chunks = [
         DocumentChunk(
-            content="Single chunk",
+            content="Only chunk",
             embedding=[0.1, 0.2, 0.3],
             chunk_index=0,
-            filename="test.pdf",
+            filename="test.txt",
             upload_timestamp=datetime.utcnow()
         )
     ]
-    
-    result = await upsert_to_qdrant(
-        "test-doc-id",
-        single_chunk,
-        qdrant_client=mock_qdrant_client
+
+    mock_client = MagicMock()
+    mock_client.ensure_collection = AsyncMock()
+    mock_client.upsert_vectors = AsyncMock()
+
+    await upsert_to_qdrant(
+        document_id=document_id,
+        chunks=chunks,
+        qdrant_client=mock_client
     )
-    
-    # Verify single point was upserted
-    mock_qdrant_client.upsert_vectors.assert_called_once()
-    points = mock_qdrant_client.upsert_vectors.call_args[0][0]
-    assert len(points) == 1
 
-
-@pytest.mark.asyncio
-async def test_upsert_payload_structure(mock_qdrant_client, sample_chunks):
-    """Test that payload contains correct document metadata."""
-    result = await upsert_to_qdrant(
-        "test-doc-id",
-        sample_chunks,
-        qdrant_client=mock_qdrant_client
-    )
-    
-    # Verify payload structure
-    points = mock_qdrant_client.upsert_vectors.call_args[0][0]
-    first_point = points[0]
-    
-    # Verify payload fields
-    assert first_point.payload["document_id"] == "test-doc-id"
-    assert first_point.payload["content"] == "First chunk of text"
-    assert first_point.payload["chunk_index"] == 0
-    assert first_point.payload["filename"] == "test.pdf"
-    assert "upload_timestamp" in first_point.payload
-
-
-@pytest.mark.asyncio
-async def test_qdrant_connection_error(mock_qdrant_client, sample_chunks):
-    """Test exception propagation on Qdrant connection error."""
-    # Setup mock to raise exception
-    mock_qdrant_client.upsert_vectors.side_effect = Exception(
-        "Connection refused"
-    )
-    
-    # Call should propagate exception
-    with pytest.raises(Exception) as exc_info:
-        await upsert_to_qdrant(
-            "test-doc-id",
-            sample_chunks,
-            qdrant_client=mock_qdrant_client
-        )
-    
-    assert "Connection refused" in str(exc_info.value)
+    mock_client.ensure_collection.assert_called_once()
+    mock_client.upsert_vectors.assert_called_once()

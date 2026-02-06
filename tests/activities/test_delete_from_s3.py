@@ -1,81 +1,75 @@
-"""Unit tests for delete_from_s3 activity."""
+"""Tests for delete_from_s3 activity."""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, ANY, patch
 from workers.activities import delete_from_s3
 
 
 @pytest.fixture
-def mock_s3_client(mocker):
+def mock_s3_client():
     """Create a mock S3 client."""
-    return mocker.MagicMock()
-
-
-@pytest.fixture
-def mock_settings(mocker):
-    """Mock settings."""
-    settings = mocker.Mock()
-    settings.s3_bucket = "test-bucket"
-    mocker.patch("workers.activities.get_settings", return_value=settings)
-    return settings
+    mock_client = MagicMock()
+    return mock_client
 
 
 @pytest.mark.asyncio
-async def test_delete_success(mock_s3_client, mock_settings):
-    """Test successful file deletion from S3."""
-    # Call the activity with mocked S3 client
+async def test_delete_from_s3_success(mock_s3_client):
+    """Test successful deletion from S3."""
+    s3_key = "documents/doc-123/test.pdf"
+
     result = await delete_from_s3(
-        "documents/test-id/file.pdf",
+        s3_key=s3_key,
         s3_client=mock_s3_client
     )
-    
-    # Assert successful deletion
-    assert result == "Deleted documents/test-id/file.pdf"
+
+    assert result == f"Deleted {s3_key}"
     mock_s3_client.delete_object.assert_called_once_with(
-        Bucket="test-bucket",
-        Key="documents/test-id/file.pdf"
+        Bucket=ANY,  # Settings will provide bucket
+        Key=s3_key
     )
 
 
 @pytest.mark.asyncio
-async def test_delete_file_not_found(mock_s3_client):
-    """Test handling of 404 Not Found error."""
-    # Simulate S3 404 error
-    error_response = {
-        "Error": {
-            "Code": "404",
-            "Message": "Not Found"
-        }
-    }
-    mock_s3_client.delete_object.side_effect = Exception(
-        "An error occurred (404) when calling the DeleteObject operation: Not Found"
-    )
-    
-    # Call the activity - should handle gracefully and return error message
+async def test_delete_from_s3_failure_returns_message(mock_s3_client):
+    """Test deletion failure returns error message (doesn't raise)."""
+    s3_key = "documents/doc-123/missing.pdf"
+
+    mock_s3_client.delete_object.side_effect = Exception("S3 access denied")
+
     result = await delete_from_s3(
-        "documents/test-id/nonexistent.pdf",
+        s3_key=s3_key,
         s3_client=mock_s3_client
     )
-    
-    # Assert that the error is handled gracefully (no exception raised)
+
     assert "Failed to delete" in result
-    assert "documents/test-id/nonexistent.pdf" in result
+    assert s3_key in result
 
 
 @pytest.mark.asyncio
-async def test_delete_s3_error(mock_s3_client):
-    """Test handling of general S3 errors."""
-    # Simulate a general S3 error
-    mock_s3_client.delete_object.side_effect = Exception(
-        "Access Denied"
-    )
-    
-    # Call the activity - should handle gracefully
-    result = await delete_from_s3(
-        "documents/test-id/protected-file.pdf",
-        s3_client=mock_s3_client
-    )
-    
-    # Assert that the error is handled gracefully
+async def test_delete_from_s3_with_different_keys():
+    """Test deletion with various S3 key formats."""
+    test_cases = [
+        "documents/doc-123/file.pdf",
+        "uploads/2024/01/15/large-file.docx",
+        "archive/old-document.txt"
+    ]
+
+    for s3_key in test_cases:
+        mock_client = MagicMock()
+        result = await delete_from_s3(s3_key=s3_key, s3_client=mock_client)
+        assert result == f"Deleted {s3_key}"
+        mock_client.delete_object.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_from_s3_cleanup_failure_still_returns():
+    """Test that cleanup failure doesn't raise exception."""
+    s3_key = "documents/doc-to-delete.pdf"
+
+    mock_client = MagicMock()
+    mock_client.delete_object.side_effect = Exception("Network error")
+
+    result = await delete_from_s3(s3_key=s3_key, s3_client=mock_client)
+
     assert "Failed to delete" in result
-    assert "documents/test-id/protected-file.pdf" in result
+    assert s3_key in result

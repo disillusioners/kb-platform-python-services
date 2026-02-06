@@ -1,3 +1,4 @@
 gen/
 __pycache__/
 .env
+.coverage
